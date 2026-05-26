@@ -1,4 +1,3 @@
-# Proyecto-Historia-Clinica-Distribuida
 # 🏥 Enterprise Distributed Electronic Health Record (EHR) System
 ### *Infraestructura Distribuida e Interoperable basada en HL7 FHIR R4, FastAPI y Observabilidad en Tiempo Real*
 
