@@ -1,0 +1,45 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: 'historia-clinica-monitor'
+
+rule_files: []
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+scrape_configs:
+  # ─── Aplicación principal FastAPI ─────────────────────────────────────────
+  - job_name: 'historia_clinica_app'
+    static_configs:
+      - targets: ['historia_clinica_app:8001']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+
+  # ─── Nodos geográficos vía API de la app (estado + latencia) ────────────
+  - job_name: 'nodo_sincelejo'
+    static_configs:
+      - targets: ['historia_clinica_app:8001']
+    metrics_path: '/metrics/nodo/sincelejo'
+    scrape_interval: 20s
+
+  - job_name: 'nodo_bogota'
+    static_configs:
+      - targets: ['historia_clinica_app:8001']
+    metrics_path: '/metrics/nodo/bogota'
+    scrape_interval: 20s
+
+  - job_name: 'nodo_medellin'
+    static_configs:
+      - targets: ['historia_clinica_app:8001']
+    metrics_path: '/metrics/nodo/medellin'
+    scrape_interval: 20s

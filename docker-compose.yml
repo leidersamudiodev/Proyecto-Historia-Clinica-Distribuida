@@ -1,0 +1,332 @@
+# Historia Clínica Distribuida — Sistema Completo con Observabilidad
+# Nodos geográficos: Sincelejo (nodo1), Bogotá (nodo2), Medellín (nodo3)
+# Levantar: docker compose up -d
+# Puertos: 5433 (Sincelejo), 5434 (Bogotá), 5435 (Medellín)
+#          8001 (app), 8081 (FHIR-Sincelejo), 8082 (FHIR-Bogotá), 8083 (FHIR-Medellín)
+#          9090 (Prometheus), 3000 (Grafana)
+
+services:
+  # ============================================================
+  # APLICACIÓN PRINCIPAL
+  # ============================================================
+  app:
+    build: .
+    container_name: historia_clinica_app
+    ports:
+      - "8001:8001"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - USE_DOCKER_NAMES=true
+      - FHIR_NODO1_URL=http://hapi-fhir-sincelejo:8080/fhir
+      - FHIR_NODO2_URL=http://hapi-fhir-bogota:8080/fhir
+      - FHIR_NODO3_URL=http://hapi-fhir-medellin:8080/fhir
+      - JWT_SECRET=hc-fhir-jwt-secret-distribuido-2024
+      - JWT_REQUIRE_AUTH=true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./templates:/app/templates
+      - ./static:/app/static
+      - ./backend:/app/backend
+      - ./middleware.py:/app/middleware.py
+      - ./app.py:/app/app.py
+    depends_on:
+      pg_nodo1:
+        condition: service_healthy
+      pg_nodo2:
+        condition: service_healthy
+      pg_nodo3:
+        condition: service_healthy
+      hapi-fhir-sincelejo:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - historia_clinica_net
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/api/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    labels:
+      - "ciudad=gateway"
+      - "servicio=api"
+
+  # ============================================================
+  # HAPI FHIR SERVERS — 3 INSTANCIAS GEOGRÁFICAS INDEPENDIENTES
+  # ============================================================
+
+  # HAPI FHIR — Nodo Sincelejo (Caribe)
+  hapi-fhir-sincelejo:
+    image: hapiproject/hapi:latest
+    container_name: hapi-fhir-sincelejo
+    hostname: fhir-sincelejo
+    ports:
+      - "8081:8080"
+    environment:
+      - spring.datasource.url=jdbc:postgresql://pg_nodo1:5432/hapi_fhir
+      - spring.datasource.username=admin
+      - spring.datasource.password=admin
+      - spring.datasource.driverClassName=org.postgresql.Driver
+      - spring.jpa.properties.hibernate.dialect=ca.uhn.fhir.jpa.model.dialect.HapiFhirPostgres94Dialect
+      - spring.jpa.hibernate.ddl-auto=update
+      - hapi.fhir.fhir_version=R4
+      - hapi.fhir.subscription.resthook_enabled=false
+      - hapi.fhir.allow_external_references=true
+      - hapi.fhir.allow_multiple_delete=true
+      - hapi.fhir.reuse_cached_search_results_millis=60000
+    depends_on:
+      pg_nodo1:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      historia_clinica_net:
+        aliases:
+          - fhir-sincelejo
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/fhir/metadata || exit 1"]
+      interval: 30s
+      timeout: 20s
+      retries: 15
+      start_period: 300s
+    labels:
+      - "ciudad=Sincelejo"
+      - "servicio=fhir"
+      - "nodo=1"
+
+  # HAPI FHIR — Nodo Bogotá (Andina)
+  hapi-fhir-bogota:
+    image: hapiproject/hapi:latest
+    container_name: hapi-fhir-bogota
+    hostname: fhir-bogota
+    ports:
+      - "8082:8080"
+    environment:
+      - spring.datasource.url=jdbc:postgresql://pg_nodo2:5432/hapi_fhir
+      - spring.datasource.username=admin
+      - spring.datasource.password=admin
+      - spring.datasource.driverClassName=org.postgresql.Driver
+      - spring.jpa.properties.hibernate.dialect=ca.uhn.fhir.jpa.model.dialect.HapiFhirPostgres94Dialect
+      - spring.jpa.hibernate.ddl-auto=update
+      - hapi.fhir.fhir_version=R4
+      - hapi.fhir.subscription.resthook_enabled=false
+      - hapi.fhir.allow_external_references=true
+      - hapi.fhir.allow_multiple_delete=true
+      - hapi.fhir.reuse_cached_search_results_millis=60000
+    depends_on:
+      pg_nodo2:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      historia_clinica_net:
+        aliases:
+          - fhir-bogota
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/fhir/metadata || exit 1"]
+      interval: 30s
+      timeout: 20s
+      retries: 15
+      start_period: 300s
+    labels:
+      - "ciudad=Bogota"
+      - "servicio=fhir"
+      - "nodo=2"
+
+  # HAPI FHIR — Nodo Medellín (Andina)
+  hapi-fhir-medellin:
+    image: hapiproject/hapi:latest
+    container_name: hapi-fhir-medellin
+    hostname: fhir-medellin
+    ports:
+      - "8083:8080"
+    environment:
+      - spring.datasource.url=jdbc:postgresql://pg_nodo3:5432/hapi_fhir
+      - spring.datasource.username=admin
+      - spring.datasource.password=admin
+      - spring.datasource.driverClassName=org.postgresql.Driver
+      - spring.jpa.properties.hibernate.dialect=ca.uhn.fhir.jpa.model.dialect.HapiFhirPostgres94Dialect
+      - spring.jpa.hibernate.ddl-auto=update
+      - hapi.fhir.fhir_version=R4
+      - hapi.fhir.subscription.resthook_enabled=false
+      - hapi.fhir.allow_external_references=true
+      - hapi.fhir.allow_multiple_delete=true
+      - hapi.fhir.reuse_cached_search_results_millis=60000
+    depends_on:
+      pg_nodo3:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      historia_clinica_net:
+        aliases:
+          - fhir-medellin
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/fhir/metadata || exit 1"]
+      interval: 30s
+      timeout: 20s
+      retries: 15
+      start_period: 300s
+    labels:
+      - "ciudad=Medellin"
+      - "servicio=fhir"
+      - "nodo=3"
+
+  # ============================================================
+  # NODOS POSTGRESQL GEOGRÁFICOS
+  # ============================================================
+  pg_nodo1:
+    image: postgres:15
+    container_name: pg_nodo1
+    hostname: sincelejo-db
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin
+      POSTGRES_DB: historia_clinica
+    volumes:
+      - pg_data_nodo1:/var/lib/postgresql/data
+      - ./database/nodo1.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d historia_clinica"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      historia_clinica_net:
+        aliases:
+          - sincelejo-db
+    labels:
+      - "ciudad=Sincelejo"
+      - "region=Caribe"
+      - "nodo=1"
+
+  pg_nodo2:
+    image: postgres:15
+    container_name: pg_nodo2
+    hostname: bogota-db
+    ports:
+      - "5434:5432"
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin
+      POSTGRES_DB: historia_clinica
+    volumes:
+      - pg_data_nodo2:/var/lib/postgresql/data
+      - ./database/nodo2.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d historia_clinica"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      historia_clinica_net:
+        aliases:
+          - bogota-db
+    labels:
+      - "ciudad=Bogota"
+      - "region=Andina"
+      - "nodo=2"
+
+  pg_nodo3:
+    image: postgres:15
+    container_name: pg_nodo3
+    hostname: medellin-db
+    ports:
+      - "5435:5432"
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin
+      POSTGRES_DB: historia_clinica
+    volumes:
+      - pg_data_nodo3:/var/lib/postgresql/data
+      - ./database/nodo3.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d historia_clinica"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      historia_clinica_net:
+        aliases:
+          - medellin-db
+    labels:
+      - "ciudad=Medellin"
+      - "region=Andina"
+      - "nodo=3"
+
+  # ============================================================
+  # OBSERVABILIDAD: PROMETHEUS
+  # ============================================================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
+    networks:
+      - historia_clinica_net
+    depends_on:
+      - app
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9090/-/healthy || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ============================================================
+  # OBSERVABILIDAD: GRAFANA
+  # ============================================================
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=grafana-clock-panel
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+    restart: unless-stopped
+    networks:
+      - historia_clinica_net
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  pg_data_nodo1:
+  pg_data_nodo2:
+  pg_data_nodo3:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  historia_clinica_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
